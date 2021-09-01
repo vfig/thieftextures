@@ -8,8 +8,8 @@ except ImportError:
     sys.exit(1)
 
 parser = argparse.ArgumentParser(description='Generate standalone .html with thumbnails of fam.crf textures.')
-parser.add_argument('crf_path', metavar='fam.crf',
-                    help='path to fam.crf')
+parser.add_argument('crf_path', metavar='fam_path',
+                    help='path to fam.crf or fam subdirectory')
 parser.add_argument('html_path', metavar='textures.html',
                     help='html file to generate')
 parser.add_argument('--size', metavar='128', type=int, default=128,
@@ -25,30 +25,47 @@ thumbnail_size = (args.size,args.size)
 thumbnail_jpeg = True
 background_color = (255,255,255)
 
+if os.path.isdir(crf_path):
+    # Read a directory
+    def file_listing():
+        fam_subdirs = [e.name
+            for e in os.scandir(crf_path)
+            if e.is_dir()]
+        files = []
+        for d in fam_subdirs:
+            files.extend(os.path.join(d, e.name)
+                for e in os.scandir(os.path.join(crf_path, d))
+                if e.is_file())
+        return sorted(files, key=(lambda s: s.lower()))
+    def open_file(name):
+        return open(os.path.join(crf_path, name), 'rb')
+elif (os.path.isfile(crf_path)
+    and (crf_path.lower().endswith('.crf')
+         or crf_path.lower().endswith('.zip'))):
+    # Read a crf/zip file
+    crf = zipfile.ZipFile(crf_path)
+    def file_listing():
+        return sorted(crf.namelist(), key=(lambda s: s.lower()))
+    def open_file(name):
+        return crf.open(name, 'r')
+
 fams = defaultdict(list)
-crf = zipfile.ZipFile(crf_path)
-sorted_infolist = sorted(crf.infolist(),
-    key=lambda info:info.filename.lower())
-for info in sorted_infolist:
-    file_path = info.filename.lower()
-    parts = file_path.split('/')
-    if len(parts)!=2:
+for file_path in file_listing():
+    parts = os.path.split(file_path.lower())
+    fam, filename = parts
+    if not fam or not filename or ('/' in fam or '\\' in fam):
         print(f"skipping {file_path}", file=sys.stderr)
         continue
-    fam, filename = parts
-    if (not filename.endswith('.pcx')
-        and not filename.endswith('.gif')
-        and not filename.endswith('.png')
-        and not filename.endswith('.jpg')):
+    name, ext = os.path.splitext(filename)
+    if (not ext in ('.pcx', '.gif', '.png', '.jpg')):
         print(f"skipping {file_path}", file=sys.stderr)
         continue
     if filename=='full.pcx':
         print(f"skipping {file_path}", file=sys.stderr)
         continue
-    name, ext = filename.rsplit('.', 1)
     print(f"converting {file_path}", file=sys.stderr)
-    with crf.open(info, mode='r') as zipf:
-        with Image.open(zipf) as im:
+    with open_file(file_path) as texf:
+        with Image.open(texf) as im:
             # TODO - transparent palette index?
             width, height = im.size
             im = im.convert('RGBA')
@@ -75,18 +92,18 @@ for fam, textures in sorted(fams.items()):
     cells = []
     for (name, ext, width, height, uri) in textures:
         cell = (
-             "<div class='texture'>"
-            f"<div class='image'><img src='{uri}'></div>"
-            f"<div class='caption'>{escape(name)} - {width}x{height} {escape(ext)}</div>"
-             "</div>"
+             "<div class='texture'>\n"
+            f"<div class='image'><img src='{uri}'></div>\n"
+            f"<div class='caption'>{escape(name)} - {width}x{height} {escape(ext)}</div>\n"
+             "</div>\n"
             )
         cells.append(cell)
     cells = "".join(cells)
     section = (
-         "<section>"
-        f"<h2>{escape(fam)}</h2>"
-        f"<div class='fam'>{cells}</div>"
-         "</section>"
+         "<section>\n"
+        f"<h2>{escape(fam)}</h2>\n"
+        f"<div class='fam'>{cells}</div>\n"
+         "</section>\n"
         )
     sections.append(section)
 sections = "".join(sections)
